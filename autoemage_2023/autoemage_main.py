@@ -2,7 +2,7 @@
 Author: Yuanhao Cheng, Wei Ding
 Email: chengyuanhao@iphy.ac.cn; dingwei@iphy.ac.cn
 Created time: 2022/06/16
-Last Edit: 2023/06/24
+Last Edit: 2023/09/06
 Group: SM6, The Institute of Physics, Chinese Academy of Sciences
 """
 from PyQt6.QtWidgets import QMainWindow, QLabel, QCheckBox, QButtonGroup, QSlider, QSpinBox, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout, QWidget, QProgressBar, QToolBar, QMessageBox, QSizePolicy, QStatusBar
@@ -17,8 +17,9 @@ from autoemage_canvas import MplCanvas
 from autoemage_help import HelpWindow
 from autoemage_settings import EMWindow
 from autoemage_input import InputWindow
-from autoemage_classification import ClassifyWindow
-from autoemage_threads import Worker1, Worker2, Worker3
+from autoemage_classification import ClassesWindow
+from autoemage_particle import ParticleWindow
+from autoemage_threads import Worker1, Worker2, Worker3, Worker4, Worker5, Worker6
 
 import numpy as np
 import matplotlib
@@ -39,7 +40,7 @@ matplotlib.use("QtAgg") #绘制图形界面所用的后端
 class MainWindow(QMainWindow):
     def __init__(self, user, name, language): 
         super().__init__()
-        self.setMinimumSize(950, 500)
+        self.setMinimumSize(1600, 900)
         self.setWindowTitle("得息镜 - AutoEMage")
         self.center()
         #定义一些核心变量 define several core variables
@@ -59,7 +60,11 @@ class MainWindow(QMainWindow):
         #相机名称
         self.camera_name = "K3"
         #放大倍数
-        self.magnification = ""
+        #self.magnification = ""
+        #加速电压
+        self.av = ""
+        #球面像差
+        self.sa = ""
         #像素尺寸
         self.pixel_size = "0.0"
         #总剂量
@@ -70,8 +75,12 @@ class MainWindow(QMainWindow):
         self.current_n = 0
         #最新照片（编号）the number of the latest image
         self.max_n = 0
+        #二维分类起始照片
+        self.classify_n = 1
         #照片数据
         self.data = []
+        #异常数据号码
+        self.outliers = []
         #计算路径
         self.cal_dir1 = ""
         #画图选项（编号）
@@ -97,6 +106,15 @@ class MainWindow(QMainWindow):
         self.count = 0
         #异常打分计数
         self.low_score_count = 0
+        #颗粒总数
+        self.total_pn = 0
+        #颗粒数
+        self.pn_list = []
+        #异常数据监测起始数
+        self.motion_start = 50
+        self.ctf_start = 50
+        #建立模板时的照片编号
+        self.reference_n = 1
         self.setUpMainWindow()
         self.createActions() #工具
         self.createMenu() #菜单栏
@@ -113,26 +131,31 @@ class MainWindow(QMainWindow):
         """设置主界面"""
         if self.language == 1:
             #样品信息栏
-            sample_label = QLabel("样品名称：")
+            sample_label = QLabel("任务名称：")
             sample_label.setFont(QFont('Times',12))
             self.sample_label_value = QLabel()
             self.sample_label_value.setFont(QFont('Times',12))
-            self.sample_label_value.setText(f"{self.sample_name}")
+            self.sample_label_value.setText(f"{self.job_name}")
             camera_label = QLabel("相机名称：")
             camera_label.setFont(QFont('Times',12))
             self.camera_label_value = QLabel()
             self.camera_label_value.setFont(QFont('Times',12))
             self.camera_label_value.setText(f"{self.camera_name}")
-            pixel_label = QLabel("像素尺寸：")
+            pixel_label = QLabel("像素尺寸 (A)：")
             pixel_label.setFont(QFont('Times',12))
             self.pixel_label_value = QLabel()
             self.pixel_label_value.setFont(QFont('Times',12))
             self.pixel_label_value.setText(f"{self.pixel_size}")
-            mag_label = QLabel("放大倍数：")
+            mag_label = QLabel("加速电压 (kV)：")
             mag_label.setFont(QFont('Times',12))
             self.mag_label_value = QLabel()
             self.mag_label_value.setFont(QFont('Times',12))
-            self.mag_label_value.setText(f"{self.magnification}")
+            self.mag_label_value.setText(f"{self.av}")
+            sa_label = QLabel("球面像差 (mm)：")
+            sa_label.setFont(QFont('Times',12))
+            self.sa_label_value = QLabel()
+            self.sa_label_value.setFont(QFont('Times',12))
+            self.sa_label_value.setText(f"{self.sa}")
             dose_label = QLabel("总剂量 (e/A2)：")
             dose_label.setFont(QFont('Times',12))
             self.dose_label_value = QLabel()
@@ -194,7 +217,7 @@ class MainWindow(QMainWindow):
             self.time_slider2 = QSlider(Qt.Orientation.Horizontal)
             self.time_slider2.setSliderPosition(20)
             #右侧展示图
-            self.r_canvas = MplCanvas(self, width=6, height=5, dpi=100)
+            self.r_canvas = MplCanvas(self, width=7, height=7, dpi=100)
             r_toolbar = NavigationToolbar2QT(self.r_canvas, self)
             #照片信息展示栏
             current_image = QLabel("当前照片：")
@@ -206,20 +229,31 @@ class MainWindow(QMainWindow):
             phase_shift = QLabel("像散 (A)：")
             phase_shift.setFont(QFont('Times',12))
             self.astigmatism_value = QLabel()
+            CTF_score = QLabel("CTF 分辨率 (A):")
+            CTF_score.setFont(QFont('Times',12))
+            self.CTF_score_value = QLabel()
+            particle_n = QLabel("颗粒数:")
+            particle_n.setFont(QFont('Times',12))
+            self.particle_n_value = QLabel()
             #照片查看按钮栏
             self.image_num_sb = QSpinBox()
+            self.image_num_sb.setFont(QFont('Times',12))
             self.image_num_sb.setStatusTip("选择并展示所选照片")
-            self.image_num_sb.setRange(0,12000)
+            self.image_num_sb.setRange(0,30000)
             ok_button2 = QPushButton("确定")
+            ok_button2.setFont(QFont('Times',12))
             ok_button2.clicked.connect(self.chooseImage)
             ok_button2.setStatusTip("选择并展示所选照片")
             previous_button = QPushButton("前一张")
+            previous_button.setFont(QFont('Times',12))
             previous_button.setStatusTip("展示前一张照片")
             previous_button.clicked.connect(lambda: self.shiftImage(-1))
             next_button = QPushButton("后一张")
+            next_button.setFont(QFont('Times',12))
             next_button.clicked.connect(lambda: self.shiftImage(1))
             next_button.setStatusTip("展示后一张照片")
             refresh_button = QPushButton("刷新")
+            refresh_button.setFont(QFont('Times',12))
             refresh_button.clicked.connect(self.updateImage)
             refresh_button.setStatusTip("展示最新照片")
         else:
@@ -228,22 +262,27 @@ class MainWindow(QMainWindow):
             sample_label.setFont(QFont('Times',12))
             self.sample_label_value = QLabel()
             self.sample_label_value.setFont(QFont('Times',12))
-            self.sample_label_value.setText(f"{self.sample_name}")
+            self.sample_label_value.setText(f"{self.job_name}")
             camera_label = QLabel("Camera:")
             camera_label.setFont(QFont('Times',12))
             self.camera_label_value = QLabel()
             self.camera_label_value.setFont(QFont('Times',12))
             self.camera_label_value.setText(f"{self.camera_name}")
-            pixel_label = QLabel("Pixel size:")
+            pixel_label = QLabel("Pixel size (A):")
             pixel_label.setFont(QFont('Times',12))
             self.pixel_label_value = QLabel()
             self.pixel_label_value.setFont(QFont('Times',12))
             self.pixel_label_value.setText(f"{self.pixel_size}")
-            mag_label = QLabel("Magnification:")
+            mag_label = QLabel("Voltage (kV):")
             mag_label.setFont(QFont('Times',12))
             self.mag_label_value = QLabel()
             self.mag_label_value.setFont(QFont('Times',12))
-            self.mag_label_value.setText(f"{self.magnification}")
+            self.mag_label_value.setText(f"{self.av}")
+            sa_label = QLabel("Spherical aberration (mm):")
+            sa_label.setFont(QFont('Times',12))
+            self.sa_label_value = QLabel()
+            self.sa_label_value.setFont(QFont('Times',12))
+            self.sa_label_value.setText(f"{self.sa}")
             dose_label = QLabel("Total dose (e/A2):")
             dose_label.setFont(QFont('Times',12))
             self.dose_label_value = QLabel()
@@ -297,7 +336,7 @@ class MainWindow(QMainWindow):
             self.time_slider2 = QSlider(Qt.Orientation.Horizontal)
             self.time_slider2.setSliderPosition(20)
             #display on the right side
-            self.r_canvas = MplCanvas(self, width=5.5, height=4.5, dpi=100)
+            self.r_canvas = MplCanvas(self, width=7, height=7, dpi=100)
             r_toolbar = NavigationToolbar2QT(self.r_canvas, self)
             #Image information
             current_image = QLabel("Current image:")
@@ -309,28 +348,41 @@ class MainWindow(QMainWindow):
             phase_shift = QLabel("Astigmatism (A):")
             phase_shift.setFont(QFont('Times',12))
             self.astigmatism_value = QLabel()
+            CTF_score = QLabel("CTF resolution (A):")
+            CTF_score.setFont(QFont('Times',12))
+            self.CTF_score_value = QLabel()
+            particle_n = QLabel("N particles:")
+            particle_n.setFont(QFont('Times',12))
+            self.particle_n_value = QLabel()
             #Image display buttons
             self.image_num_sb = QSpinBox()
+            self.image_num_sb.setFont(QFont('Times',12))
             self.image_num_sb.setStatusTip("Choose and display a specific image")
-            self.image_num_sb.setRange(0,12000)
+            self.image_num_sb.setRange(0,30000)
             ok_button2 = QPushButton("OK")
+            ok_button2.setFont(QFont('Times',12))
             ok_button2.clicked.connect(self.chooseImage)
             ok_button2.setStatusTip("Choose and display a specific image")
             previous_button = QPushButton("Previous")
+            previous_button.setFont(QFont('Times',12))
             previous_button.clicked.connect(lambda: self.shiftImage(-1))
             next_button = QPushButton("Next")
+            next_button.setFont(QFont('Times',12))
             next_button.clicked.connect(lambda: self.shiftImage(1))
             refresh_button = QPushButton("Update")
+            refresh_button.setFont(QFont('Times',12))
             refresh_button.clicked.connect(self.updateImage)
         #界面格式设置 layout setting
         #左侧界面 left side
         grid = QGridLayout()
         grid.addWidget(sample_label, 0, 0)
-        grid.addWidget(self.sample_label_value, 0, 1, 1, 2)
-        grid.addWidget(camera_label, 1, 0)
-        grid.addWidget(self.camera_label_value, 1, 1)
-        grid.addWidget(mag_label, 1, 2)
-        grid.addWidget(self.mag_label_value, 1, 3, 1, 2)
+        grid.addWidget(self.sample_label_value, 0, 1)
+        grid.addWidget(camera_label, 0, 2)
+        grid.addWidget(self.camera_label_value, 0, 3)
+        grid.addWidget(mag_label, 1, 0)
+        grid.addWidget(self.mag_label_value, 1, 1)
+        grid.addWidget(sa_label, 1, 2)
+        grid.addWidget(self.sa_label_value, 1, 3)
         grid.addWidget(pixel_label, 2, 0)
         grid.addWidget(self.pixel_label_value, 2, 1)
         grid.addWidget(dose_label, 2, 2)
@@ -379,6 +431,11 @@ class MainWindow(QMainWindow):
         rside_h_box1.addWidget(self.defocus_value, Qt.AlignmentFlag.AlignLeft)
         rside_h_box1.addWidget(phase_shift, Qt.AlignmentFlag.AlignLeft)
         rside_h_box1.addWidget(self.astigmatism_value, Qt.AlignmentFlag.AlignLeft)
+        rside_h_box3 = QHBoxLayout()
+        rside_h_box3.addWidget(CTF_score, Qt.AlignmentFlag.AlignLeft)
+        rside_h_box3.addWidget(self.CTF_score_value, Qt.AlignmentFlag.AlignLeft)
+        rside_h_box3.addWidget(particle_n, Qt.AlignmentFlag.AlignLeft)
+        rside_h_box3.addWidget(self.particle_n_value, Qt.AlignmentFlag.AlignLeft)
         rside_h_box2 = QHBoxLayout()
         rside_h_box2.addWidget(self.image_num_sb, Qt.AlignmentFlag.AlignLeft)
         rside_h_box2.addWidget(ok_button2, Qt.AlignmentFlag.AlignLeft)
@@ -391,7 +448,7 @@ class MainWindow(QMainWindow):
         rside_v_box.addWidget(self.r_canvas, Qt.AlignmentFlag.AlignLeft)
         rside_v_box.addStretch()
         rside_v_box.addLayout(rside_h_box1)
-        rside_v_box.addStretch()
+        rside_v_box.addLayout(rside_h_box3)
         rside_v_box.addLayout(rside_h_box2)
         #主界面 main window
         main_h_box = QHBoxLayout()
@@ -407,7 +464,7 @@ class MainWindow(QMainWindow):
         if self.language == 1:
             #文件转移功能
             self.input_values_act = QAction(QIcon(f"{self.path}/images/input_values.png"), "转移文件")
-            self.input_values_act.setStatusTip("输入参数并开始自动转移文件")
+            self.input_values_act.setStatusTip("输入参数并开始自动转移、处理文件")
             self.input_values_act.triggered.connect(self.setUpInputWindow)
             #终止任务功能
             self.kill_act = QAction(QIcon(f"{self.path}/images/kill.png"), "终止")
@@ -425,9 +482,9 @@ class MainWindow(QMainWindow):
             self.play_act.triggered.connect(self.contTransfer)
             self.play_act.setDisabled(True)
             #粒子挑选与分类功能
-            self.classify_act = QAction(QIcon(f"{self.path}/images/tag.png"), "粒子分类")
-            self.classify_act.setStatusTip("粒子挑选与分类")
-            self.classify_act.triggered.connect(self.setUpClassifyWindow)
+            #self.classify_act = QAction(QIcon(f"{self.path}/images/tag.png"), "粒子分类")
+            #self.classify_act.setStatusTip("粒子挑选与分类")
+            #self.classify_act.triggered.connect(self.setUpClassifyWindow)
             #帮助功能
             self.about_act = QAction("使用说明")
             self.about_act.triggered.connect(self.aboutDialog)
@@ -458,9 +515,9 @@ class MainWindow(QMainWindow):
             self.about_act = QAction("User Manual")
             self.about_act.triggered.connect(self.aboutDialog)
             #particle picking and 2D classification
-            self.classify_act = QAction(QIcon(f"{self.path}/images/tag.png"), "Particle Classification")
-            self.classify_act.setStatusTip("Particle Picking and Classification")
-            self.classify_act.triggered.connect(self.setUpClassifyWindow)
+            #self.classify_act = QAction(QIcon(f"{self.path}/images/tag.png"), "Particle Classification")
+            #self.classify_act.setStatusTip("Particle Picking and Classification")
+            #self.classify_act.triggered.connect(self.setUpClassifyWindow)
             #electron microscope settings (incomplete)
             self.EMsetting_act = QAction("EM settings")
             self.EMsetting_act.triggered.connect(self.setEM)
@@ -494,8 +551,8 @@ class MainWindow(QMainWindow):
         tool_bar.addAction(self.kill_act)
         tool_bar.addAction(self.play_act)
         tool_bar.addAction(self.stop_act)
-        tool_bar.addSeparator()
-        tool_bar.addAction(self.classify_act)
+        #tool_bar.addSeparator()
+        #tool_bar.addAction(self.classify_act)
 
     def setEM(self):
         '''打开设置窗口 open EM setting window'''
@@ -539,9 +596,10 @@ class MainWindow(QMainWindow):
         """终止转移"""
         os.kill(self.mv_process, signal.SIGKILL)
         os.kill(self.ctf_process, signal.SIGKILL)
-        #self.worker1.stopRunning()
-        #self.worker2.stopRunning()
-        #self.worker3.stopRunning()
+        if self.worker1:
+            self.worker1.kill()
+        if self.worker2:
+            self.worker2.kill()
         self.kill_act.setDisabled(True)
         self.play_act.setDisabled(True)
         self.stop_act.setDisabled(True)
@@ -556,18 +614,21 @@ class MainWindow(QMainWindow):
         self.mv_process = p1 + 1
         self.ctf_process = p2 + 1
 
-    def checkFile(self, job, num, dose, psize, directory):
+    def checkFile(self, job, num, dose, psize, av, sa, directory, postfix):
         """开始线程 start threads"""
-        self.data = []
         self.r_canvas.axes.cla()
         self.cal_dir1 = directory
         self.job_name = job
         self.image_num = num
         self.pixel_size = psize
         self.total_dose = dose
+        self.av = av
+        self.sa = sa
         self.sample_label_value.setText(f"{self.job_name}")
         self.pixel_label_value.setText(f"{self.pixel_size}")
         self.dose_label_value.setText(f"{self.total_dose}")
+        self.mag_label_value.setText(f"{self.av}")
+        self.sa_label_value.setText(f"{self.sa}")
         self.time_slider1.setRange(0,self.time_e)
         self.time_slider1.valueChanged.connect(self.timeStart)
         self.time_slider2.setRange(0,int(num))
@@ -577,17 +638,31 @@ class MainWindow(QMainWindow):
         self.worker1.image_update_signal.connect(self.updateNum)
         self.worker1.finished.connect(self.worker1.deleteLater)
         self.worker1.start()
-        self.worker2 = Worker2(self.cal_dir1, self.job_name, self.image_num)
+        self.worker2 = Worker2(self.cal_dir1, self.job_name, self.image_num, postfix)
         self.worker2.graph_update_signal.connect(self.updateData)
         self.worker2.progress_update_signal.connect(self.updateProgress)
-        self.worker2.low_score_signal.connect(self.lowScoreEmail)
-        self.worker2.large_drift_signal.connect(self.motion_fail_Email)
         self.worker2.finished.connect(self.worker2.deleteLater)
         self.worker2.start()
 
-    def updateNum(self, n):
+    def updateNum(self, n, pn):
         """更新最新照片（编号） update the number of image"""
         self.max_n = n
+        if self.max_n == 1:
+            self.setUpParticlesWindow(n, pn)
+        else:
+            self.updateParticlesWindow(n, pn)
+        self.total_pn += pn
+        self.pn_list.append(pn)
+        #当颗粒数超过，构造模板
+        if self.total_pn >= 20000:
+            if self.classify_n == 1:
+                self.createReference(n)
+                self.total_pn = 0
+                self.classify_n = n + 1
+            else:
+                self.classify_and_modeling(n)
+                self.total_pn = 0
+                self.classify_n = n + 1
         self.updateRWindow(n)
         if self.max_n == 5000:
             self.halfFinished()
@@ -601,10 +676,45 @@ class MainWindow(QMainWindow):
             n = int(self.image_num)
         self.progress_bar.setValue(n)
 
-    def updateData(self, data):
+    def createReference(self, n):
+        self.worker5 = Worker5(self.cal_dir1, self.job_name, self.classify_n, n, self.outliers)
+        self.worker5.classification_signal.connect(self.setUpClassesWindow)
+        self.worker5.finished.connect(self.worker5.deleteLater)
+        self.worker5.start()
+        self.reference_n = n
+
+    def classify_and_modeling(self, n):
+        self.worker6 = Worker6(self.cal_dir1, self.classify_n, n, self.reference_n, self.outliers)
+        self.worker6.update_classification_signal.connect(self.updateClassesWindow)
+        self.worker6.finished.connect(self.worker6.deleteLater)
+        self.worker6.start()
+
+    def setUpParticlesWindow(self, n, pn):
+        """打开粒子挑选窗口"""
+        self.create_particles_window = ParticleWindow(self.cal_dir1, self.language, self.job_name, n, pn)
+
+    def updateParticlesWindow(self, n, pn):
+        """更新粒子挑选窗口"""
+        self.create_particles_window.updateNumber(n, pn)
+
+    def setUpClassesWindow(self, num_s, num_e):
+        """打开二维分类窗口"""
+        self.create_classes_window = ClassesWindow(self.cal_dir1, self.language, num_s, num_e)
+
+    def updateClassesWindow(self, num_s, num_e):
+        """更新二维分类窗口"""
+        self.create_classes_window.updateNumber(num_s, num_e)
+
+    def updateData(self, data, outliers):
         """更新数据并检查 update data and check outliers"""
         self.data = data
+        self.outliers = outliers
         self.paraPlot()
+        self.worker4 = Worker4(self.cal_dir1, self.job_name, self.max_n, self.data, self.motion_start, self.ctf_start)
+        self.worker4.low_score_signal.connect(self.lowScoreEmail)
+        self.worker4.large_drift_signal.connect(self.motion_fail_Email)
+        self.worker4.finished.connect(self.worker4.deleteLater)
+        self.worker4.start()
         self.worker3 = Worker3(self.data, self.cal_dir1, self.job_name)
         self.worker3.alert_signal.connect(self.alertF)
         self.worker3.disk_signal.connect(self.diskEmail)
@@ -745,7 +855,7 @@ class MainWindow(QMainWindow):
             part1 = MIMEText(f'{content}','plain','utf-8')
             message['Subject'] = 'Job complete'
             message['From'] = self.sender
-            message['To'] = self.receiver
+            message['To'] = self.receiverm
             message.attach(part1)
             try:
                 smtpObj = smtplib.SMTP()
@@ -792,6 +902,7 @@ class MainWindow(QMainWindow):
                 print('error', e)
     def motion_fail_Email(self, n):
         """发送异常提示邮件 send reminding Emails for outliers"""
+        self.motion_start += 50
         filepath = f"{self.cal_dir1}Outliers/MotionCorr/*_all.png"
         files = glob.glob(filepath)
         files.sort()
@@ -824,7 +935,7 @@ class MainWindow(QMainWindow):
             message['From'] = self.sender
             message['To'] = self.receiver
             for i in files[-n:]:
-                with open (f"{self.cal_dir1}Outliers/MotionCorr/*_all.png", 'rb') as imf:
+                with open (i, 'rb') as imf:
                     picture = MIMEImage(imf.read())
                     picture.add_header('Content-Disposition', f'attachment;filename={i}')
                 message.attach(picture)
@@ -840,6 +951,7 @@ class MainWindow(QMainWindow):
 
     def lowScoreEmail(self, n):
         """发送异常提示邮件 send reminding Emails for outliers"""
+        self.ctf_start += 50
         filepath = f"{self.cal_dir1}Outliers/CtfFind/*_all.png"
         files = glob.glob(filepath)
         files.sort()
@@ -871,7 +983,7 @@ class MainWindow(QMainWindow):
             message['Subject'] = 'Outliers warning'
             message['From'] = self.sender
             message['To'] = self.receiver
-            for i in files[-10:]:
+            for i in files[-n:]:
                 with open (i, 'rb') as imf:
                     picture = MIMEImage(imf.read())
                     picture.add_header('Content-Disposition', f'attachment;filename={i}')
@@ -919,8 +1031,8 @@ class MainWindow(QMainWindow):
             self.l_canvas.axes.xaxis.set_major_formatter(formatter)
             self.l_canvas.fig.subplots_adjust(left=0.12, bottom=0.15, right=0.96, top=0.96)
             self.l_canvas.axes.tick_params(direction='in')
-            #plt.rcParams['font.family'] = 'serif'
-            #plt.rcParams['font.serif'] = ['Times New Roman']
+            matplotlib.rcParams['font.family'] = 'serif'
+            matplotlib.rcParams['font.serif'] = 'Times New Roman'
             self.l_canvas.draw()
 
     def timeStart(self, value):
@@ -937,19 +1049,25 @@ class MainWindow(QMainWindow):
 
     def updateRWindow(self, n):
         """四格图 update window on the right side"""
-        if len(self.data) >= n:
+        if len(self.data) >= n and len(self.pn_list) >= n:
             self.defocus_value.setText(str(self.data[n-1][1]))
-            self.astigmatism_value.setText(str(self.data[n-1][2])) 
+            self.astigmatism_value.setText(str(self.data[n-1][2]))
+            self.CTF_score_value.setText(str(self.data[n-1][6]))
+            self.particle_n_value.setText(str(self.pn_list[n-1])) 
         else:
             self.defocus_value.setText("")
             self.astigmatism_value.setText("")
+            self.CTF_score_value.setText("") 
+            self.particle_n_value.setText("")
         self.current_n = n
         self.cur_image_value.setText("%04d" % (n))
-        image = img.imread(f'{self.cal_dir1}Display/{self.job_name}_%04d_all.png' % (n))
-        self.r_canvas.axes.imshow(image)
-        self.r_canvas.axes.set_axis_off()
-        self.r_canvas.fig.subplots_adjust(left=0, bottom=0, right=1, top=1)
-        self.r_canvas.draw()
+        if os.path.exists(f"{self.cal_dir1}Display/{self.job_name}_%04d_all.png" % (n)):
+            time.sleep(1)
+            image = img.imread(f"{self.cal_dir1}Display/{self.job_name}_%04d_all.png" % (n))
+            self.r_canvas.axes.imshow(image)
+            self.r_canvas.axes.set_axis_off()
+            self.r_canvas.fig.subplots_adjust(left=0, bottom=0, right=1, top=1)
+            self.r_canvas.draw()
 
     def chooseImage(self):
         """照片选择"""

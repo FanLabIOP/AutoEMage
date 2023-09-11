@@ -2,11 +2,11 @@
 Author: Yuanhao Cheng, Wei Ding
 Email: chengyuanhao@iphy.ac.cn; dingwei@iphy.ac.cn
 Created time: 2022/06/16
-Last Edit: 2023/06/16
+Last Edit: 2023/09/06
 Group: SM6, The Institute of Physics, Chinese Academy of Sciences
 """
 
-from PyQt6.QtWidgets import QWidget, QLineEdit, QPushButton, QHBoxLayout, QFormLayout, QLabel, QSpinBox, QGridLayout, QMessageBox
+from PyQt6.QtWidgets import QWidget, QLineEdit, QPushButton, QHBoxLayout, QFormLayout, QLabel, QSpinBox, QGridLayout, QMessageBox, QComboBox
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt
 
@@ -17,6 +17,8 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 import matplotlib.image as img
 
 import os
+import time
+
 
 
 class ClassifyWindow(QWidget):
@@ -89,22 +91,24 @@ class ClassifyWindow(QWidget):
 
 class ClassesWindow(QWidget):
     """分类窗口"""
-    def __init__(self, directory, language, job, num, dmin, dmax):
+    def __init__(self, directory, language, num_s, num_e):
         super().__init__()
-        self.setMinimumSize(1100,700)
-        self.setWindowTitle("粒子分类 - 2D Classes")
+        self.setMinimumSize(1300,800)
+        self.setWindowTitle("颗粒分类 - 2D Class averages")
         self.cal_dir2 = directory
         self.language = language
-        self.job_name = job
-        self.image_num = num
-        self.checkFile1(dmin, dmax)
-        self.max_N = 0
-        self.current_N = 0
+        self.num_s = num_s
+        self.num_e = num_e
+        self.c_num_s = num_s
+        self.c_num_e = num_e
+        #self.checkFile1(dmin, dmax)
+        self.class_list = [f"{self.num_s} to {self.num_e}"]
         self.setUpDisplay()
+        self.updateMWindow(num_s, num_e)
         self.show()
 
     def setUpDisplay(self):
-        self.m_canvas = MplCanvas(self, width=8, height=5, dpi=100)
+        self.m_canvas = MplCanvas(self, width=12, height=7, dpi=100)
         m_toolbar = NavigationToolbar2QT(self.m_canvas, self)
         if self.language == 1:
             #照片信息展示栏
@@ -112,110 +116,124 @@ class ClassesWindow(QWidget):
             current_image1.setFont(QFont('Times',12))
             self.cur_image_values = QLabel()
             #照片查看按钮栏
-            self.image_num_sb1 = QSpinBox()
-            self.image_num_sb1.setStatusTip("选择并展示所选照片组的类")
-            self.image_num_sb1.setRange(0,12000)
-            ok_button3 = QPushButton("确定")
-            ok_button3.clicked.connect(self.chooseImages)
-            ok_button3.setStatusTip("选择并展示所选照片组的类")
+            self.image_num_sb1 = QComboBox()
+            self.image_num_sb1.addItem(f"{self.num_s} to {self.num_e}")
+            self.image_num_sb1.setFont(QFont('Times',12))
+            self.image_num_sb1.setToolTip("选择并展示所选照片组的类")
+            self.image_num_sb1.textActivated.connect(self.chooseImages)
+            #ok_button3 = QPushButton("确定")
+            #ok_button3.clicked.connect(self.chooseImages)
+            #ok_button3.setStatusTip("选择并展示所选照片组的类")
             previous_button1 = QPushButton("前一组")
-            previous_button1.setStatusTip("展示前一组照片的类")
+            previous_button1.setFont(QFont('Times',12))
             previous_button1.clicked.connect(lambda: self.shiftImages(-10))
             next_button1 = QPushButton("后一组")
+            next_button1.setFont(QFont('Times',12))
             next_button1.clicked.connect(lambda: self.shiftImages(10))
-            next_button1.setStatusTip("展示后一组照片的类")
+            #next_button1.setStatusTip("展示后一组照片的类")
             refresh_button1 = QPushButton("刷新")
+            refresh_button1.setFont(QFont('Times',12))
             refresh_button1.clicked.connect(self.updateImages)
-            refresh_button1.setStatusTip("展示最新照片的类")
-            kill_button1 = QPushButton("终止")
-            kill_button1.clicked.connect(self.worker4.stopRunning)
+            #refresh_button1.setStatusTip("展示最新照片的类")
+            #kill_button1 = QPushButton("终止")
+            #kill_button1.clicked.connect(self.worker4.stopRunning)
         else:
             #Images information display
             current_image1 = QLabel("Current images:")
             current_image1.setFont(QFont('Times',12))
             self.cur_image_values = QLabel()
             #Images display buttons
-            self.image_num_sb1 = QSpinBox()
-            self.image_num_sb1.setStatusTip("Choose and display selected classes")
-            self.image_num_sb1.setRange(0,12000)
-            ok_button3 = QPushButton("OK")
-            ok_button3.clicked.connect(self.chooseImages)
-            ok_button3.setStatusTip("Choose and display selected classes")
+            self.image_num_sb1 = QComboBox()
+            #self.image_num_sb1.setStatusTip("Choose and display selected classes")
+            self.image_num_sb1.addItem(f"{self.num_s} to {self.num_e}")
+            self.image_num_sb1.setFont(QFont('Times',12))
+            self.image_num_sb1.setToolTip("Choose and display selected class averages")
+            self.image_num_sb1.textActivated.connect(self.chooseImages)
+            #ok_button3 = QPushButton("OK")
+            #ok_button3.clicked.connect(self.chooseImages)
+            #ok_button3.setStatusTip("Choose and display selected classes")
             previous_button1 = QPushButton("Previous")
-            previous_button1.setStatusTip("Previous 10 images")
-            previous_button1.clicked.connect(lambda: self.shiftImages(-10))
+            previous_button1.setFont(QFont('Times',12))
+            previous_button1.setToolTip("Previous set of class averages")
+            previous_button1.clicked.connect(lambda: self.shiftImages(-1))
             next_button1 = QPushButton("Next")
-            next_button1.clicked.connect(lambda: self.shiftImages(10))
-            next_button1.setStatusTip("Next 10 images")
+            next_button1.setFont(QFont('Times',12))
+            next_button1.clicked.connect(lambda: self.shiftImages(1))
+            next_button1.setToolTip("Next set of class averages")
             refresh_button1 = QPushButton("Update")
+            refresh_button1.setFont(QFont('Times',12))
             refresh_button1.clicked.connect(self.updateImages)
-            refresh_button1.setStatusTip("Update classes")
-            kill_button1 = QPushButton("Kill")
-            kill_button1.clicked.connect(self.worker4.stopRunning)
+            refresh_button1.setToolTip("Update class averages")
+            #kill_button1 = QPushButton("Kill")
+            #kill_button1.clicked.connect(self.worker4.stopRunning)
         m_h_box = QHBoxLayout()
         m_h_box.addStretch()
         m_h_box.addWidget(self.image_num_sb1, Qt.AlignmentFlag.AlignLeft)
-        m_h_box.addWidget(ok_button3, Qt.AlignmentFlag.AlignLeft)
         m_h_box.addWidget(previous_button1, Qt.AlignmentFlag.AlignLeft)
         m_h_box.addWidget(next_button1, Qt.AlignmentFlag.AlignLeft)
         m_h_box.addWidget(refresh_button1, Qt.AlignmentFlag.AlignLeft)
-        m_h_box.addWidget(kill_button1, Qt.AlignmentFlag.AlignLeft)
+        #m_h_box.addWidget(kill_button1, Qt.AlignmentFlag.AlignLeft)
         m_h_box.addStretch()
         m_grid = QGridLayout()
-        m_grid.addWidget(m_toolbar,0,0,1,10)
-        m_grid.addWidget(self.m_canvas, 1,0,7,10)
-        m_grid.addWidget(current_image1,8,4,1,1)
-        m_grid.addWidget(self.cur_image_values,8,5,1,1)
-        m_grid.addLayout(m_h_box,9,2,2,6)
+        m_grid.addWidget(m_toolbar,0,0,1,12)
+        m_grid.addWidget(self.m_canvas, 1,0,7,12)
+        m_grid.addWidget(current_image1,8,5,1,1)
+        m_grid.addWidget(self.cur_image_values,8,6,1,1)
+        m_grid.addLayout(m_h_box,9,2,2,8)
         self.setLayout(m_grid)
 
-    def checkFile1(self, dmin, dmax): 
-        """运行分类线程"""
-        self.worker4 = Worker4(self.cal_dir2, self.job_name, self.image_num, dmin, dmax)
-        self.worker4.images_update_signal.connect(self.updateNumber)
-        self.worker4.finished.connect(self.worker4.deleteLater)
-        self.worker4.start()
+#    def checkFile1(self, dmin, dmax): 
+ #       """运行分类线程"""
+  #      self.worker4 = Worker4(self.cal_dir2, self.job_name, self.image_num, dmin, dmax)
+   #     self.worker4.images_update_signal.connect(self.updateNumber)
+    #    self.worker4.finished.connect(self.worker4.deleteLater)
+     #   self.worker4.start()
 
-    def updateNumber(self, n):
+    def updateNumber(self, num_s, num_e):
         """更新最新照片组（编号） update the number of images"""
-        self.max_N = n
-        self.updateMWindow(n)
+        self.num_s = num_s
+        self.num_e = num_e
+        self.image_num_sb1.addItem(f"{num_s} to {num_e}")
+        self.class_list.append(f"{num_s} to {num_e}")
+        self.updateMWindow(num_s, num_e)
 
-    def updateMWindow(self, n):
+    def updateMWindow(self, num_s, num_e):
         """四格图 update the window"""
-        self.current_N = n
-        m = n - 9
-        self.cur_image_values.setText("%04d - %04d" % (m, n))
-        image = img.imread(f'{self.cal_dir2}Class2D/run{m}to{n}/classes{m}to{n}.png')
-        self.m_canvas.axes.imshow(image, cmap='gray')
-        self.m_canvas.axes.set_axis_off()
-        self.m_canvas.fig.subplots_adjust(left=0, bottom=0, right=1, top=1)
-        self.m_canvas.draw()
-
-    def chooseImages(self):
-        """照片选择"""
-        if (self.image_num_sb1.value() % 10) != 0:
-            if self.language == 1:
-                QMessageBox.information(self, "提示","请输入10的倍数", QMessageBox.StandardButton.Ok)
+        self.c_num_s = num_s
+        self.c_num_e = num_e
+        self.cur_image_values.setText("%04d - %04d" % (int(num_s), int(num_e)))
+        m = 0
+        while m < 1:
+            if os.path.exists(f"{self.cal_dir2}Class2D/run{num_s}to{num_e}/classes{num_s}to{num_e}.png"):
+                image = img.imread(f'{self.cal_dir2}Class2D/run{num_s}to{num_e}/classes{num_s}to{num_e}.png')
+                self.m_canvas.axes.imshow(image, cmap='gray')
+                self.m_canvas.axes.set_axis_off()
+                self.m_canvas.fig.subplots_adjust(left=0, bottom=0, right=1, top=1)
+                self.m_canvas.draw()
+                m += 1
             else:
-                QMessageBox.information(self, "Information","Please input multiples of 10", QMessageBox.StandardButton.Ok)
-        else:
-            n = self.image_num_sb1.value()
-            m = n - 9 #每十张做一次二维分类
-            if os.path.exists(f"{self.cal_dir2}Class2D/run{m}to{n}/classes{m}to{n}.png"):
-                self.updateMWindow(n)
-            else: 
-                if self.language == 1:
-                    QMessageBox.information(self, "提示","照片不存在", QMessageBox.StandardButton.Ok)
-                else:
-                    QMessageBox.information(self, "Information","Image does not exist", QMessageBox.StandardButton.Ok)
+                time.sleep(2)
+                print("Waiting for classes plot...")
+
+    def chooseImages(self, text):
+        """照片选择"""
+        text_elements = text.split(' to ')
+#        if (self.image_num_sb1.value() % 10) != 0:
+ #           if self.language == 1:
+  #              QMessageBox.information(self, "提示","请输入10的倍数", QMessageBox.StandardButton.Ok)
+   #         else:
+    #            QMessageBox.information(self, "Information","Please input multiples of 10", QMessageBox.StandardButton.Ok)
+     #   else:
+        self.updateMWindow(text_elements[0], text_elements[1])
     
-    def shiftImages(self, num):
+    def shiftImages(self, n):
         """前一张/后一张展示"""
-        n = self.current_N + num
-        m = n - 9
-        if os.path.exists(f"{self.cal_dir2}Class2D/run{m}to{n}/classes{m}to{n}.png"):
-            self.updateMWindow(n)
+        text = f"{self.c_num_s} to {self.c_num_e}"
+        c_index = self.class_list.index(text)
+        if c_index+n > -1 and c_index+n < len(self.class_list):
+            text_new = self.class_list[c_index+n]
+            text_elements = text_new.split(' to ')
+            self.updateMWindow(text_elements[0], text_elements[1])
         else: 
             if self.language == 1:
                 QMessageBox.information(self, "提示","照片不存在", QMessageBox.StandardButton.Ok)
@@ -224,8 +242,8 @@ class ClassesWindow(QWidget):
     
     def updateImages(self):
         """展示最新照片"""
-        if self.max_N != 0:
-            self.updateMWindow(self.max_N)
+        if self.num_s != 0 and self.num_e != 0:
+            self.updateMWindow(self.num_s, self.num_e)
         else:
             if self.language == 1:
                 QMessageBox.information(self, "提示","照片计算中，请等待", QMessageBox.StandardButton.Ok)

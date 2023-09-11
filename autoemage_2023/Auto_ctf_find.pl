@@ -1,21 +1,22 @@
 #!/usr/bin/perl
-####################################################################################
+############################################################################################################
 #Author: Yuanhao Cheng, Wei Ding
 #Email: chengyuanhao@iphy.ac.cn; dingwei@iphy.ac.cn
 #Created time: 2022/06/16
 #Last Edit: 2023/06/16
 #Group: SM6, The Institute of Physics, Chinese Academy of Sciences
-####################################################################################
+############################################################################################################
 use strict;
 use warnings;
 use Getopt::Long;
+use Benchmark;
 
 my $mode; my $INFO_dir; my $USB_dir; my $job_name; my $rmi; 
 my $psize; my $total_dose; my $bin; my $acv; my $SpA; my $ac; my $sps; 
 my $min_r; my $max_r; my $min_d; my $max_d; my $dss; my $exa; my $phase;
 my $min_Pshift; my $max_Pshift; my $PS_step; my $thr; my $ctf_a_name;
 my $space_limit; my $stack_size; my $obj_stigma_x; my $obj_stigma_y;
-my $year; my $mon; my $day; my $hour; my $minute; my $file_num;
+my $year; my $mon; my $day; my $hour; my $minute; my $dmin; my $dmax;
 GetOptions(
 	'mode=i' 		=>\$mode,
 	'INFO_dir=s'	=>\$INFO_dir,
@@ -50,7 +51,8 @@ GetOptions(
 	'day=i'		=>\$day,
 	'h=i' 			=>\$hour,
 	'm=i' 			=>\$minute,
-	'file_num=i'	=>\$file_num);
+	'dmin=i' 		=>\$dmin,
+	'dmax=i' 		=>\$dmax);
         
 unless($mode && $job_name && $INFO_dir && $USB_dir && $psize && $space_limit && $total_dose) {
 	print "$0 使用方法：\n*必要参数*\t解释\n"; 
@@ -91,7 +93,7 @@ unless ($min_d) {$min_d=5000.0}
 unless ($max_d) {$max_d=50000.0}		
 unless ($dss) {$dss=500.0}		
 unless ($exa) {$exa=100.0}		
-unless ($phase) {$phase=1}
+unless ($phase) {$phase=2}
 unless ($min_Pshift) {$min_Pshift=0.0}
 unless ($max_Pshift) {$max_Pshift=3.15}
 unless ($PS_step) {$PS_step=0.5}
@@ -101,6 +103,9 @@ unless ($obj_stigma_x) {$obj_stigma_x=0}
 unless ($obj_stigma_y) {$obj_stigma_y=0}
 unless ($bin) {$bin=1}
 
+my $t0; my $t1; my $t2;
+$t0 = Benchmark->new;
+
 my $ctf_postfix = "_ctf.mrc";
 my $SumCorr_postfix = "_SumCorr_DW.mrc";
 my $file_postfix = ".tiff";
@@ -109,7 +114,7 @@ my $SumCorr_mrc = "${ctf_a_name}$SumCorr_postfix"; #ctf 输入文件名 (无路�
 my $ctf_output_file = "${ctf_a_name}$ctf_postfix"; #ctf 输出文件名 (无路径)
 my $ctf_dir = "${USB_dir}CtfFind/"; #ctf文件夹
 my $motioncorr_dir = "${USB_dir}MotionCorr/"; #motioncorr文件夹
-my $ctf_values = "${ctf_dir}$job_name";
+#my $ctf_values = "${ctf_dir}$job_name";
 
 chdir $ctf_dir;
 #-------ctf estimation----------	
@@ -130,10 +135,11 @@ close (CTFfile);
 
 system  "cat ${ctf_a_name}.SumCorr.ctf.para | ctffind >> ${INFO_dir}${job_name}_ctf.log"; #ctf计算
 print "cat ${ctf_a_name}.SumCorr.ctf.para | ctffind >> ${INFO_dir}${job_name}_ctf.log\n";
-sleep(10);
+
 my $ctftxt_file = "${ctf_a_name}_ctf.txt"; my $t = 0;
 my @element; my $line; my $stigma;
-while ($t < 1) {
+while ($t < 1) 
+{
 	if (-e "${ctftxt_file}") {
 		$line = `awk '/1.000000/' $ctftxt_file`;
 		$ctftxt_file =~ s/.{8}$//; #去掉末尾长度为8的字母/数字
@@ -144,9 +150,12 @@ while ($t < 1) {
 		$element[4] = $element[4] / 3.14; 
 		$element[4] = sprintf("%.2f",$element[4]);
 		$t++}
-	else {sleep(10);}}
-if ($element[4] > 0.7) {
-	if ($phase == 1) {
+	else {sleep(10);}
+}
+if ($element[4] > 0.7) 
+{
+	if ($phase == 1) 
+	{
 		open (CTFfile,">${ctf_a_name}.SumCorr.ctf.para");
         	$max_r = $psize * 2.1; $min_d = 2000; $max_d = 20000;
 	        print CTFfile ("$SumCorr_mrc\n$ctf_output_file\n$psize\n$acv\n$SpA\n$ac\n$sps\n$min_r\n$max_r\n$min_d\n$max_d\n$dss\nno\nyes\nyes\n$exa\nyes\n$min_Pshift\n$max_Pshift\n$PS_step\nno\n");
@@ -161,7 +170,9 @@ if ($element[4] > 0.7) {
 		$stigma = sprintf ("%.6f",$stigma);
 		$stigma =~ s/^[-]{1}//; #CtfAstigmatism
 		$element[4] = $element[4] / 3.14;
-		$element[4] = sprintf("%.2f",$element[4]);}}
+		$element[4] = sprintf("%.2f",$element[4]);
+	}
+}
 my $defocus = $element[1]/10000; #以 Angstrom 为单位
 $defocus = sprintf("%.2f", $defocus);	
 $element[1] = sprintf("%.6f",$element[1]); #defocusU
@@ -171,59 +182,66 @@ $element[5] = sprintf("%.6f",$element[5]); #cross correlation
 $element[6] = sprintf("%.6f",$element[6]); #CtfMaxResolution
 
 #用contrast_mean检查照片的平均对比度
-my $contrast_mean_result = `contrast_mean $SumCorr_mrc | grep Contrast_Mean`;
-print "contrast_mean $SumCorr_mrc | grep Contrast_Mean\n";
-print "${contrast_mean_result}\n";
-my @contrast_mean = split(/ +/,$contrast_mean_result);
-chomp($contrast_mean[5]);
-$contrast_mean[0] = $contrast_mean[5];
+#my $contrast_mean_result = `contrast_mean $SumCorr_mrc | grep Contrast_Mean`;
+#print "contrast_mean $SumCorr_mrc | grep Contrast_Mean\n";
+#print "${contrast_mean_result}\n";
+#my @contrast_mean = split(/ +/,$contrast_mean_result);
+#chomp($contrast_mean[5]);
+#$contrast_mean[0] = $contrast_mean[5];
 
 my $frame_num = `frames_counter.py ${USB_dir}${ctf_a_name}$file_postfix | grep total`;
 $frame_num =~ s/\ frames\ total$//;
-#print "$rename_file 照片帧数：$frame_num";
+print "${USB_dir}${ctf_a_name}$file_postfix";
 chomp($frame_num);
 
-my $mean_value;
-if ($mode == 1) {
-	$mean_value = 0.05 * $contrast_mean[0] * ( 1 / $psize ) * ( 1 / $psize );}
-else    {
-	$mean_value = 5.1 * $contrast_mean[0] * ( 1 / $psize ) * ( 1 / $psize );}			
+#my $mean_value;
+#if ($mode == 1) 
+#{
+#	$mean_value = 0.05 * $contrast_mean[0] * ( 1 / $psize ) * ( 1 / $psize );
+#}
+#else    
+#{
+#	$mean_value = 5.1 * $contrast_mean[0] * ( 1 / $psize ) * ( 1 / $psize );
+#}
+			
 my $stack = "${USB_dir}${ctf_a_name}$file_postfix";
-unless (-e "${USB_dir}${ctf_a_name}$file_postfix") {
-	$stack = "${USB_dir}${ctf_a_name}$file_postfix";}
+unless (-e "${USB_dir}${ctf_a_name}$file_postfix") 
+{
+	$stack = "${USB_dir}${ctf_a_name}$file_postfix";
+}
 	
-#提取 tif 文件大小
+#提取 tiff 文件大小
 my $tif_size = `du -b $stack`;
 $tif_size =~ s/\s+$stack//;
 chomp($tif_size);
 
-if ($phase == 1) {$mean_value = 1.088 * $mean_value;}
+#if ($phase == 1) {$mean_value = 1.088 * $mean_value;}
 
 my $image_num = $ctf_a_name;
 $image_num =~ s/^${job_name}_//;
-if ($image_num > 8999) {$mean_value = 20.111;}
+#if ($image_num > 8999) {$mean_value = 20.111;}
 
 #计算冰厚
-$mean_value = sprintf "%.3f", $mean_value;
-my $thickness = 368 * log ($total_dose / $mean_value);
-$thickness = sprintf("%.1f",$thickness);
+#$mean_value = sprintf "%.3f", $mean_value;
+#my $thickness = 368 * log ($total_dose / $mean_value);
+#$thickness = sprintf("%.1f",$thickness);
 
-my $collection_time1 = `date -r "$stack" "+%s"`; #以秒为单位记录流逝时间
-my $collection_time2 = `date -r "$stack" "+%F\ %R"`; #显示文件创建时间，格式为2022-04-07 20:53
-chomp($collection_time1);
-chomp($collection_time2);
+#my $collection_time1 = `date -r "$stack" "+%s"`; #以秒为单位记录流逝时间
+#my $collection_time2 = `date -r "$stack" "+%F\ %R"`; #显示文件创建时间，格式为2022-04-07 20:53
+#chomp($collection_time1);
+#chomp($collection_time2);
 
-my $storage_time_s; my @name_s; my $storage_time;
-$storage_time_s = `awk '/takes time/' ${INFO_dir}${job_name}_auto_mv_corr.log | grep $ctf_a_name | tail -1`;
-@name_s = split /\ /, $storage_time_s;
-$storage_time = $name_s[-2]; #提取转移文件所耗时间
-open (TMPfile,">>$ctf_values");
-print TMPfile ("$mean_value\t$tif_size\t$collection_time1\t$ctftxt_file\t$element[1]\t$element[2]\t$stigma\t$element[3]\t$element[5]\t$element[6]\t$storage_time\t$collection_time2\t$element[4]\t$frame_num\t$thickness\n");
-close (TMPfile);
+#my $storage_time_s; my @name_s; my $storage_time;
+#$storage_time_s = `awk '/takes time/' ${INFO_dir}${job_name}_auto_mv_corr.log | grep $ctf_a_name | tail -1`;
+#@name_s = split /\ /, $storage_time_s;
+#$storage_time = $name_s[-2]; #提取转移文件所耗时间
+#open (TMPfile,">>$ctf_values");
+#print TMPfile ("$mean_value\t$tif_size\t$collection_time1\t$ctftxt_file\t$element[1]\t$element[2]\t$stigma\t$element[3]\t$element[5]\t$element[6]\t$storage_time\t$collection_time2\t$element[4]\t$frame_num\t$thickness\n");
+#close (TMPfile);
 	
-my $magnification;
-$magnification = 5 * 10000 / $psize;
-$magnification = sprintf("%.1f", $magnification);
+#my $magnification;
+#$magnification = 5 * 10000 / $psize;
+#$magnification = sprintf("%.1f", $magnification);
 #open (TMPfile,">${ctf_a_name}$ctffind4_postfix");
 #print TMPfile ("\n CS[mm], HT[kV], AmpCnst, XMAG, DStep[um]\n  2.7    $acv     0.07	   $magnification   5.000\n");
 #print TMPfile ("\n   $element[1]    $element[2]    $element[3]    $element[5]  Final Values\n\n");
@@ -234,13 +252,16 @@ $magnification = sprintf("%.1f", $magnification);
 #print TMPfile ("Thon rings with good fit up to  : $element[6]\n");
 #close (TMPfile);
 
-my $num_start = $file_num - 9;
-open (Starfile, ">>micrographs_${num_start}to${file_num}_ctf.star");
+#my $num_start = $file_num - 9;
+my @ctf_name_array = split /_/, $ctf_a_name;
+my $num_name = $ctf_name_array[1];
+open (Starfile, ">>micrograph_${num_name}_ctf.star");
 print Starfile ("CtfFind/${ctf_a_name}_SumCorr_DW.mrc            1 CtfFind/${ctf_a_name}_ctf.mrc $element[1] $element[2]   $stigma    $element[3]     $element[5]     $element[6]\n");
 close (Starfile);
 
 #-------move stack to /media and dose weighting----------
-if ($image_num < 9000)	{
+#if ($image_num < 9000)	
+#{
 #	unless (-e "0_shift.txt") {
 #		open (Shiftfile,">0_shift.txt");
 #		print Shiftfile ("# Unblur shifts file for input stack : ${ctf_a_name}.mrc\n");
@@ -340,29 +361,29 @@ if ($image_num < 9000)	{
 	#	`mv "${ctf_a_name}_SumCorr_DW.mrc" "${USB_dir}${ctf_a_name}_SumCorr_doseWeight.mrc"`}}
 
 #summarize stigma every 10 images
-	my $file_name = $ctf_a_name;
-	$file_name =~ s/^${job_name}_//;
-	my $remain = $file_name % 10;
-	if ($remain == 0) {
-		if ($file_name >= 10) {
-			my $last_num = $file_name;
-			my $first_num = $last_num - 10 + 1;
-			`cd $ctf_dir; Stigma_check_hxj_v1.pl -input_file $ctf_values -job $job_name -first_num $first_num -last_num $last_num >> ${ctf_a_name}_auto_f3_ctf.log &`;
-			print "cd $ctf_dir; Stigma_check_hxj_v1.pl -input_file $ctf_values -job $job_name -first_num $first_num -last_num $last_num >> ${ctf_a_name}_auto_f3_ctf.log &";
-			my $disk_space_line = `df -h | grep work1`;	
-			my @disk_space = split(/ +/,$disk_space_line);
-                       $disk_space[4] =~ s/\%//;
-			open(TMPfile,">>${ctf_values}_stigma");
-			print TMPfile ("The data disk has been used $disk_space[4]%\n");
-			print TMPfile ("Output frame numbers: $frame_num\n");
-			close(TMPfile);
-			$disk_space_line = `df -h | grep work1`;
-			@disk_space = split(/ +/,$disk_space_line);
-			$disk_space[4] =~ s/\%//;
-			open(TMPfile,">>${ctf_values}_stigma");
-			print TMPfile ("USB has been used $disk_space[4]%\n");
-			close(TMPfile);}}
-	}
+#	my $file_name = $ctf_a_name;
+#	$file_name =~ s/^${job_name}_//;
+#	my $remain = $file_name % 10;
+#	if ($remain == 0) {
+#		if ($file_name >= 10) {
+#			my $last_num = $file_name;
+#			my $first_num = $last_num - 10 + 1;
+#			`cd $ctf_dir; Stigma_check_hxj_v1.pl -input_file $ctf_values -job $job_name -first_num $first_num -last_num $last_num >> ${ctf_a_name}_auto_f3_ctf.log &`;
+#			print "cd $ctf_dir; Stigma_check_hxj_v1.pl -input_file $ctf_values -job $job_name -first_num $first_num -last_num $last_num >> ${ctf_a_name}_auto_f3_ctf.log &";
+#			my $disk_space_line = `df -h | grep work1`;	
+#			my @disk_space = split(/ +/,$disk_space_line);
+#			$disk_space[4] =~ s/\%//;
+#			open(TMPfile,">>${ctf_values}_stigma");
+#			print TMPfile ("The data disk has been used $disk_space[4]%\n");
+#			print TMPfile ("Output frame numbers: $frame_num\n");
+#			close(TMPfile);
+#			$disk_space_line = `df -h | grep work1`;
+#			@disk_space = split(/ +/,$disk_space_line);
+#			$disk_space[4] =~ s/\%//;
+#			open(TMPfile,">>${ctf_values}_stigma");
+#			print TMPfile ("USB has been used $disk_space[4]%\n");
+#			close(TMPfile);}}
+#}
 my @usb_string = split /\//, $USB_dir; #从USB路径中提取USB名称
 my $USB = "/$usb_string[1]";
 my $disk_space_line = `df -h | grep $USB`; #根据USB名称提取USB信息
@@ -386,7 +407,7 @@ print DataFile1 ("$year-$mon-${day}T$hour:$minute, $defocus, $stigma, $element[3
 close(DataFile1);
 
 open(DataFile1, ">${job_name}_DataFile2.txt");
-print DataFile1 ("${USB_dir}, ${ctf_a_name}");
+print DataFile1 ("${USB_dir}, ${ctf_a_name}, ${mode}");
 close(DataFile1);
 
 #脚本路径
@@ -395,9 +416,27 @@ close(DataFile1);
 #my $script_dir = "";
 #for (my $i=1; $i <= ($length-5) ; $i++) {
 #	$script_dir = $script_dir."/".$path_string[$i];}
+$t1 = Benchmark->new;
+my $td1 = timediff($t1, $t0);
+open (TMPfile3,">>${INFO_dir}ctf_timer.log");
+print TMPfile3 ("ctffind took:", timestr($td1), "\n");
+close (TMPfile3);
 
+
+chdir $USB_dir;
+#自动挑颗粒
+`relion_autopick --i CtfFind/micrograph_${num_name}_ctf.star --odir Autopick/ --pickname autopick_${num_name} --LoG  --LoG_diam_min $dmin --LoG_diam_max $dmax --shrink 0 --lowpass 20 --LoG_adjust_threshold 0 --LoG_upper_threshold 5 >> Autopick/${job_name}_auto_picking.txt`;
+print "relion_autopick --i CtfFind/micrograph_${num_name}_ctf.star --odir Autopick/ --pickname autopick_${num_name} --LoG  --LoG_diam_min $dmin --LoG_diam_max $dmax --shrink 0 --lowpass 20 --LoG_adjust_threshold 0 --LoG_upper_threshold 5 >> Autopick/${job_name}_auto_picking.txt";
+
+$t2 = Benchmark->new;
+my $td2 = timediff($t2, $t1);
+open (TMPfile3,">>${INFO_dir}autopicking_timer.log");
+print TMPfile3 ("autopicking took: ", timestr($td2), "\n");
+close (TMPfile3);
+
+chdir $ctf_dir;
 unless (-e "${USB_dir}Display"){`mkdir ${USB_dir}Display`;}
 #画四格图
-`cat ${job_name}_DataFile2.txt | plot_4.py`;
+`plot_4.py ${USB_dir} ${ctf_a_name} ${mode}`;
 
 exit;

@@ -9,6 +9,7 @@
 use strict;
 use warnings;
 use Getopt::Long;
+use Benchmark;
 
 my $mode; my $EM_dir; my $USB_dir; my $INFO_dir; my $job_name; my $raw_n;
 my $rmi; my $rename_file; my $diskspace; my $psize; my $total_dose; my $acv; my $file_postfix;
@@ -26,7 +27,7 @@ GetOptions(
 	'psize=f' 		=>\$psize,
     'total_dose=f' 	=>\$total_dose,
     'acv=i' 		=>\$acv, #加速电压
-    'file_postfix=s' =>\$file_postfix); #文件名后缀
+    'postfix=s' 	=>\$file_postfix); #文件名后缀
 
 unless($mode && $EM_dir && $USB_dir && $job_name && $raw_n && $rename_file && $diskspace && $psize && $total_dose) 
 {
@@ -43,6 +44,9 @@ unless($mode && $EM_dir && $USB_dir && $job_name && $raw_n && $rename_file && $d
 	print "\t-disk_space\t90%\t硬盘已用比例\n";
 	exit;
 }
+
+my $t0; my $t1;
+$t0 = Benchmark->new;
 my $rename_profix_num = sprintf "%04d", $raw_n; #输出有格式的字符串
 my $rename_remain_num = 0;
 my $INFO_record = "${INFO_dir}${job_name}_file_record";
@@ -56,13 +60,15 @@ $mon = $mon+1;
 print "$year-$mon-$day $hour:$min:$sec\n";
 
 #移动照片文件并将所耗时间写在一个新的文件里
-`ls|time -o "${INFO_dir}${job_name}_${rename_profix_num}_mv_time" -p cp $rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix`;
+#`ls|time -o "${INFO_dir}${job_name}_${rename_profix_num}_mv_time" -p cp $rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix`;
+`cp $rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix`;
+
 #提取刚刚写的所耗时间
-my $real_mv_time = `awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`; 
-`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`; 
-chomp($real_mv_time);
-my @mv_time = split (/\s+/, $real_mv_time);
-my $total_time = $mv_time[1];
+#my $real_mv_time = `awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`; 
+#`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`; 
+#chomp($real_mv_time);
+#my @mv_time = split (/\s+/, $real_mv_time);
+#my $total_time = $mv_time[1];
 
 #for (my $i=1; $i <= 10; $i++) {
 #	if (-e $rename_file) {
@@ -84,58 +90,134 @@ chomp($frame_num);
 my $dose_per_frame = $total_dose / $frame_num;
 
 my $gpu_num = 0; my $log_line; my @element_log_line;
+
+#检查目前是否有relion_refine在运行
+my $gpu_running = `ps au | grep relion_refine | grep -v grep | grep -v vim | grep -v gedit |wc -l`; 
+chomp($gpu_running);
+my $gpu_remain = 1 - $gpu_running; #空闲GPU数量
+while ($gpu_remain <= 0) 
+{
+	sleep(10);
+	print "GPU is in use! Wait for 10 seconds.\n";
+	$gpu_running = `ps au | grep relion_refine | grep -v grep | grep -v vim | grep -v gedit |wc -l`; 
+	chomp($gpu_running);
+	$gpu_remain = 1 - $gpu_running; #空闲GPU数量
+}
+
 if ($mode == 2) 
 {
-	if ($raw_n > 8999) 
+	if ($raw_n > 9999) 
 	{
-		#system "mv ${cal_dir}${job_name}_${rename_profix_num}.tif ${cal_dir}${job_name}_${rename_profix_num}_imod.tif";
-		system "ls|time -o ${INFO_dir}${job_name}_${rename_profix_num}_mv_time -p MotionCor2_1.6.4_Cuda121_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 20 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.5 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
-		$real_mv_time = `awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
-		`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
-		chomp($real_mv_time);                
-		@mv_time = split (/\s+/, $real_mv_time);
-		$total_time = $total_time + $mv_time[1];
-		print "$diskspace% disk space used... Moving $rename_file to ${USB_dir}${job_name}_${rename_profix_num}$file_postfix takes time $total_time sec\n";
+		if ($file_postfix =~ ".mrc")
+		{
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InMrc ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+		}
+		elsif ($file_postfix =~ ".tif") 
+		{
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";	
+		}
+		elsif ($file_postfix =~ ".tiff")
+		{
+			#system "mv ${cal_dir}${job_name}_${rename_profix_num}.tif ${cal_dir}${job_name}_${rename_profix_num}_imod.tif";
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+			#$real_mv_time = `awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
+			#`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
+			#chomp($real_mv_time);                
+			#@mv_time = split (/\s+/, $real_mv_time);
+			#$total_time = $total_time + $mv_time[1];
+		}
+		else
+		{
+			print "The file postfix is NOT supported yet!\n";
+			exit;
+		}
 	}
 	else	
 	{
-		# MotionCor2进行漂移修正并且把照片叠加 Using MotionCor2 to do motion correction
-		print "MotionCor2_1.6.4_Cuda121_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 20 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.5 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num\n";
-		system "ls|time -o ${INFO_dir}${job_name}_${rename_profix_num}_mv_time -p MotionCor2_1.6.4_Cuda121_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 20 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.5 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
-		$real_mv_time = `awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
-		`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
-		chomp($real_mv_time);
-		@mv_time = split (/\s+/, $real_mv_time);
-		$total_time = $total_time + $mv_time[1];
-		print "$diskspace% disk space used... Moving $rename_file to ${USB_dir}${job_name}_${rename_profix_num}$file_postfix takes time $total_time sec\n";
-
-		$log_line = "1 2 3 4 no info";
-		@element_log_line = split(/\ +/,$log_line);
-		open (TMPfile1,">>$INFO_record");
-		print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
-		close (TMPfile1);
+		if ($file_postfix =~ ".mrc")
+		{
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InMrc ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+			$log_line = "1 2 3 4 no info";
+			@element_log_line = split(/\ +/,$log_line);
+			open (TMPfile1,">>$INFO_record");
+			print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
+			close (TMPfile1);
+		}
+		elsif ($file_postfix =~ ".tif") 
+		{
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+				
+			$log_line = "1 2 3 4 no info";
+			@element_log_line = split(/\ +/,$log_line);
+			open (TMPfile1,">>$INFO_record");
+			print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
+			close (TMPfile1);
+		}
+		elsif ($file_postfix =~ ".tiff")
+		{
+			#system "mv ${cal_dir}${job_name}_${rename_profix_num}.tif ${cal_dir}${job_name}_${rename_profix_num}_imod.tif";
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 500 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+			$log_line = "1 2 3 4 no info";
+			@element_log_line = split(/\ +/,$log_line);
+			open (TMPfile1,">>$INFO_record");
+			print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
+			close (TMPfile1);
+		}
+		else
+		{
+			print "The file postfix is NOT supported yet!\n";
+			exit;
+		}
 	}
 }	
 elsif ($mode == 1) 
 {
-	if ($raw_n < 8999) 
+	if ($raw_n < 9999) 
 	{
 		#system "mv ${cal_dir}${job_name}_${rename_profix_num}.tif ${cal_dir}${job_name}_${rename_profix_num}_imod.tif";
 		#print "mv ${cal_dir}${job_name}_${rename_profix_num}.tif ${cal_dir}${job_name}_${rename_profix_num}_imod.tif\n";
-		print "ls|time -o ${INFO_dir}${job_name}_${rename_profix_num}_mv_time -p MotionCor2_1.6.4_Cuda121_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 20 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.5 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 >> ${INFO_dir}${job_name}_motioncorr.log\n";
-		system "ls|time -o ${INFO_dir}${job_name}_${rename_profix_num}_mv_time -p MotionCor2_1.6.4_Cuda121_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 20 -Bft 500 -FtBin 2 -Iter 20 -Tol 0.5 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
-		$real_mv_time=`awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
-		`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
-		chomp($real_mv_time);
-		@mv_time = split (/ +/, $real_mv_time);
-		$total_time = $total_time + $mv_time[1];
-	    print "$diskspace% disk space used... Moving $rename_file to ${USB_dir}${job_name}_${rename_profix_num}$file_postfix takes time $total_time sec\n";
+		if ($file_postfix =~ ".tiff")
+		{
+			print "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 150 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 >> ${INFO_dir}${job_name}_motioncorr.log\n";
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 150 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+			#$real_mv_time=`awk '/real/' "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
+			#`rm -rf "${INFO_dir}${job_name}_${rename_profix_num}_mv_time"`;
+			#chomp($real_mv_time);
+			#@mv_time = split (/ +/, $real_mv_time);
+			#$total_time = $total_time + $mv_time[1];
+			#print "$diskspace% disk space used... Moving $rename_file to ${USB_dir}${job_name}_${rename_profix_num}$file_postfix takes time $total_time sec\n";
 
-		$log_line="1 2 3 4 no info";
-		@element_log_line = split(/\s+/,$log_line);
-		open (TMPfile1,">>$INFO_record");
-		print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
-		close (TMPfile1);
+			$log_line="1 2 3 4 no info";
+			@element_log_line = split(/\s+/,$log_line);
+			open (TMPfile1,">>$INFO_record");
+			print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
+			close (TMPfile1);
+		}
+		elsif ($file_postfix =~ ".tif")
+		{
+			print "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 150 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 >> ${INFO_dir}${job_name}_motioncorr.log\n";
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InTiff ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 150 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+			$log_line="1 2 3 4 no info";
+			@element_log_line = split(/\s+/,$log_line);
+			open (TMPfile1,">>$INFO_record");
+			print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
+			close (TMPfile1);
+		}
+		elsif ($file_postfix =~ ".mrc")
+		{
+			print "MotionCor2_1.6.4_Cuda116_Mar312023 -InMrc ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 150 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 >> ${INFO_dir}${job_name}_motioncorr.log\n";
+			system "MotionCor2_1.6.4_Cuda116_Mar312023 -InMrc ${USB_dir}${job_name}_${rename_profix_num}$file_postfix -OutMrc ${motioncorr_dir}${job_name}_${rename_profix_num}_SumCorr.mrc -Gain ${USB_dir}gain_8bit.mrc -LogDir ${motioncorr_dir} -Patch 7 5 -Bft 150 -Iter 20 -Tol 0.2 -Throw 3 -FmDose $dose_per_frame -PixSize $psize -kV $acv -SumRange 0 0 -Gpu $gpu_num >> ${INFO_dir}${job_name}_motioncorr.log";
+			$log_line="1 2 3 4 no info";
+			@element_log_line = split(/\s+/,$log_line);
+			open (TMPfile1,">>$INFO_record");
+			print TMPfile1 ("$rename_file ${USB_dir}${job_name}_${rename_profix_num}$file_postfix $element_log_line[4] $element_log_line[5]\n");
+			close (TMPfile1);
+		}
+		else
+		{
+			print "The file postfix is NOT supported yet!\n";
+			exit;
+		}
 	}
 	else   
 	{
@@ -146,5 +228,10 @@ elsif ($mode == 1)
         my $a = 1;
 	}
 }
+$t1 = Benchmark->new;
+my $td2 = timediff($t1, $t0);
+open (TMPfile3,">>${INFO_dir}motion_correction_timer.log");
+print TMPfile3 ("$diskspace% disk space used... \nMotion correction took:", timestr($td2), "\n");
+close (TMPfile3);
 print "Auto_mv_corr finished ${job_name}_${rename_profix_num}!\n"; 
 exit;

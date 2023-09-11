@@ -87,12 +87,12 @@ class LoginWindow(QWidget):
     def englishTab(self):
         """英文页面"""
         login_label2 = QLabel("User Login")
-        login_label2.setFont(QFont("Times",18))
+        login_label2.setFont(QFont("Times", 18))
         self.username_edit2 = QLineEdit()
         self.password_edit2 = QLineEdit()
         self.password_edit2.setEchoMode(QLineEdit.EchoMode.Password)
         self.show_password_cb2 = QCheckBox("Show Password")
-        self.show_password_cb2.toggled.connect(self.displayPassword)
+        self.show_password_cb2.toggled.connect(self.displayPassword2)
         login_button2 = QPushButton("Login", self)
         login_button2.clicked.connect(lambda:self.clickLogin(2))
         sign_up_button2 = QPushButton("Sign Up", self)

@@ -45,3 +45,5 @@ fi
 Details can be found in the [manual](autoemage_2023/manual_english.pdf).
 ## Contact Information
 Emails: ipcas_oasis@163.com; chengyuanhao@iphy.ac.cn
+## Licensing
+AutoEMage is available free of charge for non-profit academic use. Commercial/for-profit licensing inquiries can be sent to dingwei@iphy.ac.cn.
